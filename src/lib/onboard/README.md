@@ -8,27 +8,62 @@ Use this as an inventory when adding or redesigning extensibility around messagi
 web search, model credentials, agent harnesses, policies, runtime patches, or future
 features.
 
-## Product direction
+## Proposal flow
 
-NemoClaw should be a secure lifecycle manager for agent harnesses and their
-capabilities. OpenClaw, Hermes, and Deep Agents Code are built-in harness adapters
-today; future harnesses should be addable through constrained plugins that declare
-what they need and what they can consume.
+One possible extensibility model is to treat NemoClaw as a secure lifecycle manager for
+agent harnesses and their capabilities. In that model, OpenClaw, Hermes, and Deep
+Agents Code are built-in harness adapters today, and future harnesses could be added
+through constrained plugins that declare what they need and what they can consume.
 
-The extensibility boundary should stay declarative by default. Plugins describe
+```text
+NemoClaw FSM
+  consumes declared interfaces
+    from agent harness plugins
+    from capability plugins
+  then applies policies, credentials, build/runtime config, verification, and registry state
+```
+
+This suggests two plugin shapes:
+
+1. Agent harness plugins
+
+   Examples: OpenClaw, Hermes, Deep Agents Code, and future user-provided harnesses.
+
+   They could declare:
+
+   - install/build steps
+   - startup command
+   - config render targets
+   - supported capabilities, such as messaging, web search, MCP, dashboards, tools, and
+     voice
+   - required ports/forwards
+   - health checks
+   - runtime state paths
+   - required policy presets
+   - unsupported paths and failure messages
+
+2. Capability plugins
+
+   Examples: messaging channels, web search providers, voice-call, custom tools,
+   observability, and model-provider adapters.
+
+   They could declare:
+
+   - config inputs
+   - secret inputs
+   - credential bindings
+   - policy contributions
+   - package/runtime requirements
+   - config fragments for compatible harnesses
+   - health/status hooks
+   - rebuild/recreate/live-apply behavior
+
+The likely secure default is a declarative plugin boundary: plugins describe
 configuration, credentials, policies, packages, config render targets, runtime setup,
-forwards, health checks, and state fidelity. The onboard FSM consumes those contracts
-and applies the trusted host-side effects. Arbitrary plugin code should not run with
-NemoClaw host privileges unless it is explicitly sandboxed, allowlisted, and covered by
-a separate trust model.
-
-There are two plugin shapes to preserve:
-
-- Agent harness plugins declare how to install, configure, launch, verify, and persist
-  a harness. They also declare which capability interfaces they consume or reject.
-- Capability plugins declare features that can attach to one or more harnesses, such as
-  messaging channels, web search providers, voice-call, custom tools, observability, or
-  model-provider adapters.
+forwards, health checks, and state fidelity; the onboard FSM consumes those contracts
+and applies the trusted host-side effects. If a plugin needs host-side executable code,
+that probably needs a separate trust model with sandboxing, allowlisting, provenance,
+and replay semantics.
 
 ## Feature interfaces consumed by the FSM
 
