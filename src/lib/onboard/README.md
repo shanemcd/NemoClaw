@@ -8,11 +8,35 @@ Use this as an inventory when adding or redesigning extensibility around messagi
 web search, model credentials, agent harnesses, policies, runtime patches, or future
 features.
 
+## Product direction
+
+NemoClaw should be a secure lifecycle manager for agent harnesses and their
+capabilities. OpenClaw, Hermes, and Deep Agents Code are built-in harness adapters
+today; future harnesses should be addable through constrained plugins that declare
+what they need and what they can consume.
+
+The extensibility boundary should stay declarative by default. Plugins describe
+configuration, credentials, policies, packages, config render targets, runtime setup,
+forwards, health checks, and state fidelity. The onboard FSM consumes those contracts
+and applies the trusted host-side effects. Arbitrary plugin code should not run with
+NemoClaw host privileges unless it is explicitly sandboxed, allowlisted, and covered by
+a separate trust model.
+
+There are two plugin shapes to preserve:
+
+- Agent harness plugins declare how to install, configure, launch, verify, and persist
+  a harness. They also declare which capability interfaces they consume or reject.
+- Capability plugins declare features that can attach to one or more harnesses, such as
+  messaging channels, web search providers, voice-call, custom tools, observability, or
+  model-provider adapters.
+
 ## Feature interfaces consumed by the FSM
 
 | Interface | FSM consumption points | Contract | Current examples |
 |---|---|---|---|
-| Capability descriptor | `init`, `sandbox`, `policies`, `agent_setup`. | Describe the feature, supported agents, required phases, persisted fidelity, and whether it is build-time, runtime, or live-mutable. | Messaging manifests, `agents/*/manifest.yaml`, web-search provider metadata, Hermes tool gateways. |
+| Agent harness adapter | `init`, `sandbox`, `agent_setup`, `policies`, `finalizing`. | Declare harness identity, install/build/start commands, config targets, runtime state paths, forwards, health checks, supported capability interfaces, and reject paths. | Built-in OpenClaw, Hermes, and Deep Agents Code adapters; future user-provided harness plugins. |
+| Capability descriptor | `init`, `sandbox`, `policies`, `agent_setup`. | Describe the feature, supported harnesses, required phases, persisted fidelity, and whether it is build-time, runtime, or live-mutable. | Messaging manifests, web-search provider metadata, VoiceClaw/voice-call, custom tool or observability plugins, Hermes tool gateways. |
+| Plugin trust boundary | `init`, `sandbox`, resume/repair compatibility paths. | Prefer declarative manifests and audited primitives; any host-side executable plugin hook needs sandboxing, allowlisting, provenance, and replay semantics. | Messaging build/runtime primitives, Dockerfile patch primitives, policy primitives, future managed plugin/package metadata. |
 | Support gate | `init`, `provider_selection`, `sandbox`, `policies`. | Fail or skip before mutation when the selected agent, provider, image, driver, or runtime cannot consume the feature. | Messaging `supportedAgents`, Hermes-only Tavily web search, Deep Agents Code messaging rejection, Docker-driver GPU/base-image constraints. |
 | Configuration input | `init`, `provider_selection`, `sandbox`, `policies`. | Capture non-secret choices with defaults, validation, resume semantics, and one owning state. | Messaging channel config, web-search provider choice, model/provider selection, Hermes auth/tool gateways, policy tier, tool disclosure mode. |
 | Secret input | `provider_selection`, `sandbox`, `finalizing`. | Prompt, stage, validate, migrate, or clean up raw values only at the application edge; plans, events, registry, and session store env names, placeholders, hashes, or redacted URLs. | Model provider keys, Bedrock auth, Brave/Tavily keys, messaging tokens, Hermes API keys/OAuth, legacy credential migration. |
@@ -30,6 +54,15 @@ features.
 
 ## Consumer examples
 
+- Agent harness adapters are the primary extensibility consumers. OpenClaw consumes
+  plugin/config outputs, Hermes consumes gateway/platform/search outputs, and Deep
+  Agents Code consumes terminal/runtime-guard outputs while rejecting unsupported
+  messaging paths. Future harness plugins should declare the same consume/reject
+  contract rather than requiring NemoClaw source changes.
+- Capability plugins attach features to compatible harnesses. Messaging channels, web
+  search providers, voice-call, custom tools, observability, and model-provider adapters
+  should expose declarative inputs and effects that the FSM can validate, apply, replay,
+  and verify.
 - Messaging currently exercises the fullest interface set: descriptor, support gate,
   config input, secret input, credential binding, policy contribution, build packages,
   config render, runtime setup, host forwards, hooks, health, state replay, and mutation
@@ -41,9 +74,6 @@ features.
   create: provider selection owns credential env names, endpoint validation, route upsert,
   compatible-endpoint reasoning, local proxy credentials, Bedrock adapter tokens, Hermes
   auth mode, and smoke verification.
-- Agent harnesses are capability consumers and gates: OpenClaw can consume plugin/config
-  outputs, Hermes can consume gateway/platform/search outputs, and Deep Agents Code can
-  consume terminal/runtime-guard outputs while rejecting unsupported messaging paths.
 - Tool disclosure, MCP preservation, GPU passthrough, dashboard forwards, DNS patches,
   and runtime monkey patches are FSM-consumed interfaces even when they are not product
   features; each can force reuse, rebuild, recreate, repair, or verification behavior.
@@ -52,12 +82,12 @@ features.
 
 | FSM state | Primary interfaces consumed |
 |---|---|
-| `init` | Capability descriptor, support gate, config input, mutation lock, session bootstrap. |
+| `init` | Agent harness adapter, capability descriptor, support gate, config input, plugin trust boundary, mutation lock, session bootstrap. |
 | `preflight` | Host prerequisites, GPU support gate, dashboard-port preflight, fatal backstops. |
 | `gateway` | Gateway lifecycle, driver config, GPU reuse, host forwards. |
 | `provider_selection` / `inference` | Secret input, credential binding, inference route, route smoke, route repair. |
 | `sandbox` | Sandbox create plan, support gates, policy seed, build mutation, runtime setup, state registration, rollback. |
-| `openclaw` / `agent_setup` | Harness package/config, host forwards, readiness probes, skipped unsupported paths. |
+| `openclaw` / `agent_setup` | Harness package/config, capability consume/reject paths, host forwards, readiness probes, skipped unsupported paths. |
 | `policies` | Policy contribution, live reconcile, compatible-endpoint smoke, finalized registry state. |
 | `finalizing` / `post_verify` | Cleanup, default sandbox, runtime verification, deployment verification, final handoff. |
 | Resume/repair | State replay, mutation boundaries, compatibility result handling, sanitized diagnostics. |
@@ -69,6 +99,7 @@ ownership explicit instead of adding more hidden finalization effects.
 
 ## Revisit checklist
 
+- [ ] Is this an agent harness plugin, a capability plugin, or a built-in FSM interface?
 - [ ] Which feature interface is being added or extended, and which FSM states consume it?
 - [ ] What belongs in transient flow context, redacted machine event context, persisted
       session, sandbox registry, generated config, and local credential storage?
@@ -80,6 +111,8 @@ ownership explicit instead of adding more hidden finalization effects.
 - [ ] Does it have explicit create, resume, rebuild, recreate, live-apply, repair, status,
       prune, and unsupported-agent behavior?
 - [ ] Does every agent harness have an explicit consume/reject path for the interface?
+- [ ] Is the plugin contract declarative, or does it require a new host-side executable
+      trust boundary?
 - [ ] Is each runtime monkey patch or preload bounded to a named module, driver/agent
       scope, phase, rollback story, and test?
 - [ ] Can stale state be pruned without deleting user-owned config, credentials, custom
