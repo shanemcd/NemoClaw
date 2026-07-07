@@ -14,6 +14,7 @@ import path from "node:path";
 
 import { containsInteger42Answer } from "../../helpers/e2e-answer-assertions.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import type { CleanupRegistry } from "../fixtures/cleanup.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, trustedSandboxShellScript } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
@@ -32,7 +33,6 @@ const GATEWAY_CONTAINER = "openshell-cluster-nemoclaw";
 const liveTest = process.env.NEMOCLAW_RUN_LIVE_E2E === "1" ? test : test.skip;
 
 type ProcessResult = { exitCode: number | null; stdout: string; stderr: string };
-type CleanupRegistry = { add(name: string, run: () => Promise<void> | void): void };
 
 function resultText(result: ProcessResult): string {
   return [result.stdout, result.stderr].filter(Boolean).join("\n");
@@ -55,7 +55,7 @@ async function onboardSandbox(
   hosted: HostedInferenceConfig,
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<ShellProbeResult> {
-  cleanup.add(`destroy sandbox ${sandboxName}`, () => host.cleanupSandbox(sandboxName));
+  cleanup.trackSandbox(host, sandboxName);
   const result = await host.nemoclaw(
     ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
     {
