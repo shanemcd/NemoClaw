@@ -18,6 +18,7 @@ import path from "node:path";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
+import { discoverHostAddress } from "../fixtures/host-address.ts";
 import { shouldRunLiveE2E } from "../fixtures/live-project-gate.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import {
@@ -308,33 +309,7 @@ async function startCompatibleMock(
 }
 
 async function hostAddressForSandbox(host: HostCliClient): Promise<string> {
-  const probe = await host.command(
-    "bash",
-    [
-      "-lc",
-      [
-        'ip_addr="$(ip route get 1.1.1.1 2>/dev/null | awk \'{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}\')"',
-        'if [ -n "$ip_addr" ]; then echo "$ip_addr"; exit 0; fi',
-        "ip_addr=\"$(hostname -I 2>/dev/null | awk '{print $1}')\"",
-        'if [ -n "$ip_addr" ]; then echo "$ip_addr"; exit 0; fi',
-        'if [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then',
-        "  for iface in en0 en1 bridge100; do",
-        '    ip_addr="$(ipconfig getifaddr "$iface" 2>/dev/null || true)"',
-        '    if [ -n "$ip_addr" ]; then echo "$ip_addr"; exit 0; fi',
-        "  done",
-        "  ip_addr=\"$(ifconfig 2>/dev/null | awk '/inet / && $2 !~ /^127\\./ {print $2; exit}')\"",
-        '  if [ -n "$ip_addr" ]; then echo "$ip_addr"; exit 0; fi',
-        "fi",
-        "echo 127.0.0.1",
-      ].join("\n"),
-    ],
-    {
-      artifactName: "host-ip-for-compatible-endpoint",
-      env: commandEnv(),
-      timeoutMs: 30_000,
-    },
-  );
-  return probe.stdout.trim().split(/\s+/)[0] || "127.0.0.1";
+  return (await discoverHostAddress(host)).address;
 }
 
 async function sourceCliAvailable(host: HostCliClient): Promise<boolean> {
