@@ -12,6 +12,7 @@
 # sandbox, then Landlock/seccomp + exec. start.sh sees non-root and sets
 # NEMOCLAW_CAPS_DROPPED (skips the root seal + setpriv path).
 
+
 set -euo pipefail
 
 export NEMOCLAW_VM_SIDECAR=1
