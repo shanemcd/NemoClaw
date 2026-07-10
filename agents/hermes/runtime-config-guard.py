@@ -326,12 +326,12 @@ def _cmdline_is_openshell_supervisor(raw: bytes) -> bool:
 
 
 def _vm_sidecar_mode() -> bool:
-    """KubeVirt / network-only sidecar: supervisor is a sibling, not PID 1."""
+    """KubeVirt / OpenShell VM: supervisor is sibling or parent, not PID 1."""
     return os.environ.get("NEMOCLAW_VM_SIDECAR") == "1"
 
 
 def _sibling_openshell_supervisor_present() -> bool:
-    """True when openshell-sandbox is running somewhere in this mount namespace."""
+    """True when openshell-sandbox is running (sibling unit or process parent)."""
     try:
         with os.scandir(PROC_ROOT) as entries:
             for entry in entries:
@@ -351,7 +351,7 @@ def _sibling_openshell_supervisor_present() -> bool:
 
 
 def _sibling_openshell_supervisor_identity() -> tuple[str, int | None] | None:
-    """Identity proof for VM sidecar topology (supervisor is not PID 1)."""
+    """Identity proof for VM OpenShell supervision (supervisor is not PID 1)."""
     try:
         with os.scandir(PROC_ROOT) as entries:
             for entry in entries:
@@ -858,9 +858,10 @@ def _attested_shields_runtime_topology() -> str:
 
 
 def _validate_action_readiness(action: str, startup_owner: bool) -> None:
-    # Network-only VM sidecar: openshell-sandbox is a sibling systemd unit, so
-    # PID-1 / parent proofs do not apply. Landlock + netns still come from the
-    # supervisor; this only relaxes the process-tree assertion.
+    # OpenShell VM: openshell-sandbox is a sibling unit (--mode=network) or
+    # this process's parent (--mode=network,process), so PID-1 / parent-chain
+    # proofs do not apply. Landlock + netns still come from the supervisor;
+    # this only relaxes the process-tree assertion.
     if _vm_sidecar_mode() and _sibling_openshell_supervisor_present():
         return
     installed_current = os.path.abspath(__file__) == INSTALLED_RUNTIME_CONFIG_GUARD
@@ -5000,8 +5001,22 @@ def ensure_api_key(hermes_dir: str, hash_file: str, mode: str) -> None:
         )
     # Preserve the active posture: mutable images are 0640, while shields-up
     # startup must keep the root-owned 0444 contract after a generated update.
-    _write_existing(env_path, updated_text, snapshot)
-    refresh_hashes(hermes_dir, hash_file, mode)
+    # OpenShell process-mode children are non-root; atomic replace needs a
+    # writable Hermes dir (root:sandbox sticky). If the parent is still sealed
+    # root:root, skip when a valid key already exists — same as provider placeholders.
+    try:
+        _write_existing(env_path, updated_text, snapshot)
+        refresh_hashes(hermes_dir, hash_file, mode)
+    except PermissionError:
+        if os.geteuid() != 0 and not minted:
+            print(
+                "[config] Hermes API_SERVER_KEY already present; "
+                ".env refresh skipped without write access",
+                file=sys.stderr,
+            )
+            print("minted=0")
+            return
+        raise
     print("minted=1" if minted else "updated=1")
 
 
