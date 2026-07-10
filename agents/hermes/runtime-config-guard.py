@@ -320,6 +320,56 @@ def _cmdline_is_openshell_supervisor(raw: bytes) -> bool:
     return bool(arguments and arguments[0] == OPENSHELL_SUPERVISOR_ARGV0)
 
 
+def _vm_sidecar_mode() -> bool:
+    """KubeVirt / network-only sidecar: supervisor is a sibling, not PID 1."""
+    return os.environ.get("NEMOCLAW_VM_SIDECAR") == "1"
+
+
+def _sibling_openshell_supervisor_present() -> bool:
+    """True when openshell-sandbox is running somewhere in this mount namespace."""
+    try:
+        with os.scandir(PROC_ROOT) as entries:
+            for entry in entries:
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    with open(
+                        f"{PROC_ROOT}/{entry.name}/cmdline", "rb"
+                    ) as cmdline_file:
+                        if _cmdline_is_openshell_supervisor(cmdline_file.read()):
+                            return True
+                except OSError:
+                    continue
+    except OSError:
+        return False
+    return False
+
+
+def _sibling_openshell_supervisor_identity() -> tuple[str, int | None] | None:
+    """Identity proof for VM sidecar topology (supervisor is not PID 1)."""
+    try:
+        with os.scandir(PROC_ROOT) as entries:
+            for entry in entries:
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    with open(
+                        f"{PROC_ROOT}/{entry.name}/cmdline", "rb"
+                    ) as cmdline_file:
+                        raw = cmdline_file.read()
+                    if not _cmdline_is_openshell_supervisor(raw):
+                        continue
+                    with open(
+                        f"{PROC_ROOT}/{entry.name}/comm", encoding="utf-8"
+                    ) as comm_file:
+                        return (comm_file.read().strip(), None)
+                except OSError:
+                    continue
+    except OSError:
+        return None
+    return None
+
+
 def _parse_process_parent_pid(raw: bytes) -> int | None:
     try:
         text = raw.decode("utf-8")
@@ -568,9 +618,13 @@ def _openshell_supervisor_identity(
             and pinned_before.st_dev == pinned_after.st_dev
             and pinned_before.st_ino == pinned_after.st_ino
         ):
+            if _vm_sidecar_mode():
+                return _sibling_openshell_supervisor_identity()
             return None
         return first_start_time, first_namespace_inode
     except (OSError, UnsafePathError):
+        if _vm_sidecar_mode():
+            return _sibling_openshell_supervisor_identity()
         return None
     finally:
         if proc_pid_fd >= 0:
@@ -742,6 +796,11 @@ def _startup_ready_marker_absent() -> bool:
 
 
 def _validate_action_readiness(action: str, startup_owner: bool) -> None:
+    # Network-only VM sidecar: openshell-sandbox is a sibling systemd unit, so
+    # PID-1 / parent proofs do not apply. Landlock + netns still come from the
+    # supervisor; this only relaxes the process-tree assertion.
+    if _vm_sidecar_mode() and _sibling_openshell_supervisor_present():
+        return
     installed_current = os.path.abspath(__file__) == INSTALLED_RUNTIME_CONFIG_GUARD
     try:
         sandbox_uid = pwd.getpwnam("sandbox").pw_uid
