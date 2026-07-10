@@ -73,12 +73,12 @@ OPENSHELL_SUPERVISOR_ARGV0 = b"/opt/openshell/bin/openshell-sandbox"
 
 
 def _vm_sidecar_mode() -> bool:
-    """KubeVirt / network-only sidecar: supervisor is a sibling, not PID 1."""
+    """KubeVirt / OpenShell VM: supervisor is sibling or parent, not PID 1."""
     return os.environ.get("NEMOCLAW_VM_SIDECAR") == "1"
 
 
 def _vm_sidecar_supervisor_running() -> bool:
-    """True when openshell-sandbox is running as a sibling supervisor."""
+    """True when openshell-sandbox is running (sibling unit or process parent)."""
     if not _vm_sidecar_mode():
         return False
     try:

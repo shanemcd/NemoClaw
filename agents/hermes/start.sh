@@ -20,7 +20,8 @@ set -euo pipefail
 # SECURITY: Lock down PATH before resolving or sourcing root startup helpers.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-# KubeVirt network-only sidecar: openshell-sandbox is a sibling systemd unit.
+# KubeVirt / OpenShell VM: openshell-sandbox is either a sibling systemd unit
+# (--mode=network) or this process's parent (--mode=network,process).
 # nemoclaw-start-vm exports NEMOCLAW_VM_SIDECAR=1 before exec'ing this script.
 if [ "${NEMOCLAW_VM_SIDECAR:-}" = "1" ]; then
   # Supervisor already dropped caps / owns isolation; skip capsh re-exec.
@@ -612,6 +613,53 @@ hermes_config_root_is_locked() {
     && hermes_config_path_is_locked "${HERMES_DIR}/.env"
 }
 
+# OpenShell --mode=network,process: cloud-init leaves the Hermes dir as
+# root:sandbox sticky so the Landlock'd sandbox child can atomic-replace
+# mutable .env / .config-hash without unlinking root-owned trust anchors.
+hermes_config_root_is_openshell_process_posture() {
+  local owner mode
+
+  owner="$(stat -c '%U:%G' "$HERMES_DIR" 2>/dev/null || stat -f '%Su:%Sg' "$HERMES_DIR" 2>/dev/null || true)"
+  mode="$(stat -c '%a' "$HERMES_DIR" 2>/dev/null || stat -f '%Lp' "$HERMES_DIR" 2>/dev/null || true)"
+
+  case "${owner} ${mode}" in
+    "root:sandbox 1775" | "root:sandbox 01775") ;;
+    *) return 1 ;;
+  esac
+
+  hermes_config_path_is_locked "${HERMES_DIR}/config.yaml"
+}
+
+ensure_hermes_config_root_mode() {
+  if [ -L "$HERMES_DIR" ] || [ ! -d "$HERMES_DIR" ]; then
+    echo "[SECURITY] Refusing Hermes layout repair because ${HERMES_DIR} is not a safe directory" >&2
+    return 1
+  fi
+
+  if hermes_config_root_is_locked; then
+    echo "[gateway] Hermes config root is locked; preserving shields-up permissions" >&2
+    return 0
+  fi
+
+  if hermes_config_root_is_openshell_process_posture; then
+    echo "[gateway] Hermes config root uses OpenShell process posture; preserving permissions" >&2
+    return 0
+  fi
+
+  if [ "$(id -u)" -eq 0 ]; then
+    chown sandbox:sandbox "$HERMES_DIR" || return 1
+  fi
+  if ! chmod 3770 "$HERMES_DIR" 2>/dev/null; then
+    # Non-root OpenShell children cannot chmod a root-owned Hermes dir.
+    if [ "$(id -u)" -ne 0 ] && [ -w "$HERMES_DIR" ]; then
+      echo "[gateway] WARNING: cannot chmod ${HERMES_DIR} as non-root; continuing with existing mode" >&2
+      return 0
+    fi
+    echo "[SECURITY] Failed to set Hermes config root mode on ${HERMES_DIR}" >&2
+    return 1
+  fi
+}
+
 hermes_locked_parent_is_protected() {
   local owner mode
   owner="$(stat -c '%U:%G' /sandbox 2>/dev/null || stat -f '%Su:%Sg' /sandbox 2>/dev/null || true)"
@@ -643,23 +691,6 @@ apply_shields_up_runtime_env() {
     unset HERMES_KANBAN_DISPATCH_IN_GATEWAY
     _NEMOCLAW_SET_KANBAN_DISPATCH=0
   fi
-}
-
-ensure_hermes_config_root_mode() {
-  if [ -L "$HERMES_DIR" ] || [ ! -d "$HERMES_DIR" ]; then
-    echo "[SECURITY] Refusing Hermes layout repair because ${HERMES_DIR} is not a safe directory" >&2
-    return 1
-  fi
-
-  if hermes_config_root_is_locked; then
-    echo "[gateway] Hermes config root is locked; preserving shields-up permissions" >&2
-    return 0
-  fi
-
-  if [ "$(id -u)" -eq 0 ]; then
-    chown sandbox:sandbox "$HERMES_DIR" || return 1
-  fi
-  chmod 3770 "$HERMES_DIR"
 }
 
 ensure_hermes_state_dir() {
