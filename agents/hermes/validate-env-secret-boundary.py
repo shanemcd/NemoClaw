@@ -69,6 +69,34 @@ INSTALLED_BOUNDARY_VALIDATOR = (
 )
 INSTALLED_ENV_ROOT = "/sandbox"
 INSTALLED_ENV_PATH = "/sandbox/.hermes/.env"
+OPENSHELL_SUPERVISOR_ARGV0 = b"/opt/openshell/bin/openshell-sandbox"
+
+
+def _vm_sidecar_mode() -> bool:
+    """KubeVirt / network-only sidecar: supervisor is a sibling, not PID 1."""
+    return os.environ.get("NEMOCLAW_VM_SIDECAR") == "1"
+
+
+def _vm_sidecar_supervisor_running() -> bool:
+    """True when openshell-sandbox is running as a sibling supervisor."""
+    if not _vm_sidecar_mode():
+        return False
+    try:
+        with os.scandir("/proc") as entries:
+            for entry in entries:
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    with open(f"/proc/{entry.name}/cmdline", "rb") as cmdline_file:
+                        raw = cmdline_file.read()
+                    arguments = raw.split(b"\0")
+                    if arguments and arguments[0] == OPENSHELL_SUPERVISOR_ARGV0:
+                        return True
+                except OSError:
+                    continue
+    except OSError:
+        return False
+    return False
 
 
 class UnsafeEnvInputError(RuntimeError):
@@ -377,6 +405,10 @@ def _emit_violations(
 
 
 def validate_env_file(path: str) -> int:
+    # Sibling supervisor owns the secret boundary via proxy rewrite; skip the
+    # container PID-1 posture checks used for combined-mode OpenShell.
+    if _vm_sidecar_supervisor_running():
+        return 0
     try:
         with _open_env_path(path) as (
             file_fd,
@@ -477,6 +509,8 @@ def validate_env_file(path: str) -> int:
 
 
 def validate_runtime_env(env: dict[str, str] | None = None) -> int:
+    if _vm_sidecar_supervisor_running():
+        return 0
     source = os.environ if env is None else env
     violations: list[str] = []
     violation_count = 0

@@ -20,6 +20,15 @@ set -euo pipefail
 # SECURITY: Lock down PATH before resolving or sourcing root startup helpers.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
+# KubeVirt network-only sidecar: openshell-sandbox is a sibling systemd unit.
+# nemoclaw-start-vm exports NEMOCLAW_VM_SIDECAR=1 before exec'ing this script.
+if [ "${NEMOCLAW_VM_SIDECAR:-}" = "1" ]; then
+  # Supervisor already dropped caps / owns isolation; skip capsh re-exec.
+  export NEMOCLAW_CAPS_DROPPED="${NEMOCLAW_CAPS_DROPPED:-1}"
+  # Hermes CLI lives in the image venv (not on the locked-down PATH above).
+  export PATH="/opt/hermes/.venv/bin:${PATH}"
+fi
+
 # ── Source shared sandbox initialisation library ─────────────────
 # Single source of truth for security-sensitive primitives shared with
 # scripts/nemoclaw-start.sh (OpenClaw). Ref: #2277
@@ -97,7 +106,11 @@ if [ "$(id -u)" -eq 0 ]; then
 else
   prepare_restricted_log "$_START_LOG" "" 600
 fi
-exec > >(tee -a "$_START_LOG") 2> >(tee -a "$_START_LOG" >&2)
+# Process-substitution tee fails under Landlock in the VM sidecar topology;
+# journald / systemd captures stdout there instead.
+if [ "${NEMOCLAW_VM_SIDECAR:-}" != "1" ]; then
+  exec > >(tee -a "$_START_LOG") 2> >(tee -a "$_START_LOG" >&2)
+fi
 
 # ── Drop unnecessary Linux capabilities (shared) ────────────────
 drop_capabilities /usr/local/bin/nemoclaw-start "$@"
