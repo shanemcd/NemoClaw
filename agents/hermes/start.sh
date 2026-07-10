@@ -63,6 +63,15 @@ unset NEMOCLAW_ENTRYPOINT_NORMALIZED_ARGC NEMOCLAW_ENTRYPOINT_NORMALIZED_ARGV \
 unset -f nemoclaw_normalize_entrypoint_env_wrapper
 # managed-entrypoint-env-wrapper end
 
+# KubeVirt network-only sidecar: openshell-sandbox is a sibling systemd unit.
+# nemoclaw-start-vm exports NEMOCLAW_VM_SIDECAR=1 before exec'ing this script.
+if [ "${NEMOCLAW_VM_SIDECAR:-}" = "1" ]; then
+  # Supervisor already dropped caps / owns isolation; skip capsh re-exec.
+  export NEMOCLAW_CAPS_DROPPED="${NEMOCLAW_CAPS_DROPPED:-1}"
+  # Hermes CLI lives in the image venv (not on the locked-down PATH above).
+  export PATH="/opt/hermes/.venv/bin:${PATH}"
+fi
+
 # ── Source shared sandbox initialisation library ─────────────────
 # Single source of truth for security-sensitive primitives shared with
 # scripts/nemoclaw-start.sh (OpenClaw). Ref: #2277
@@ -96,6 +105,53 @@ fi
 if [ -f /opt/hermes/ui-tui/dist/entry.js ]; then
   export HERMES_TUI_DIR="/opt/hermes/ui-tui"
 fi
+
+# ── Early stderr/stdout capture ──────────────────────────────────
+# Capture all entrypoint output to /tmp/nemoclaw-start.log so startup
+# failures before /tmp/gateway.log exists are still diagnosable.
+prepare_restricted_log() {
+  local path="$1"
+  local owner="${2:-}"
+  local mode="${3:-600}"
+  local dir base tmp
+
+  dir="$(dirname "$path")"
+  base="$(basename "$path")"
+  tmp="$(mktemp "${dir}/.${base}.tmp.XXXXXX")" || return 1
+  : >"$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  if [ "$(id -u)" -eq 0 ] && [ -n "$owner" ] && ! chown "$owner" "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! chmod "$mode" "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! mv -f "$tmp" "$path"; then
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+_START_LOG="/tmp/nemoclaw-start.log"
+if [ "$(id -u)" -eq 0 ]; then
+  prepare_restricted_log "$_START_LOG" root:root 600
+else
+  prepare_restricted_log "$_START_LOG" "" 600
+fi
+# Process-substitution tee fails under Landlock in the VM sidecar topology;
+# journald / systemd captures stdout there instead.
+if [ "${NEMOCLAW_VM_SIDECAR:-}" != "1" ]; then
+  exec > >(tee -a "$_START_LOG") 2> >(tee -a "$_START_LOG" >&2)
+fi
+
+# ── Drop unnecessary Linux capabilities (shared) ────────────────
+drop_capabilities /usr/local/bin/nemoclaw-start "$@"
+
+NEMOCLAW_CMD=("$@")
 
 _chat_ui_url_dashboard_settings() {
   [ -n "${CHAT_UI_URL:-}" ] || return 2
