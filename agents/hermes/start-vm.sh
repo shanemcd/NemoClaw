@@ -7,6 +7,12 @@
 # openshell-sandbox supervisor that is either a sibling systemd unit
 # (--mode=network) or this process's parent (--mode=network,process).
 # PID 1 is systemd in both cases, not the supervisor.
+#
+# With OPENSHELL_DEFER_PRIVILEGE_DROP=1, openshell-sandbox chowns /sandbox then
+# spawns this entrypoint as root under Landlock/seccomp. start.sh takes the
+# normal root path: seal trust anchors, then setpriv/capsh step-down — matching
+# the container ENTRYPOINT model. If already non-root (legacy sibling layout),
+# start.sh skips the root seal path.
 
 set -euo pipefail
 
