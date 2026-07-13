@@ -435,6 +435,13 @@ truthy_env() {
   esac
 }
 
+# Opt out of Hermes config/MCP hash enforcement (mutable PVC / in-place disk
+# upgrades where Hermes may rewrite config.yaml without refreshing hashes).
+# Default remains fail-closed. Accepts 1/true/yes/on (case-insensitive).
+hermes_skip_config_integrity() {
+  truthy_env "${NEMOCLAW_SKIP_HERMES_CONFIG_INTEGRITY:-}"
+}
+
 validate_tcp_port() {
   local name="$1"
   local value="$2"
@@ -482,6 +489,10 @@ hermes_dashboard_tui_enabled() {
 # verify_config_integrity is provided by sandbox-init.sh (parameterized).
 
 verify_hermes_config_integrity() {
+  if hermes_skip_config_integrity; then
+    echo "[config] Skipping Hermes config integrity check (NEMOCLAW_SKIP_HERMES_CONFIG_INTEGRITY)" >&2
+    return 0
+  fi
   if [ "$(id -u)" -eq 0 ]; then
     # Docker may start UID 0 without the supplementary groups declared in
     # /etc/group, and hardened runtimes can drop CAP_DAC_OVERRIDE before this
@@ -2177,6 +2188,12 @@ inspect_hermes_mcp_integrity() {
   local hash_file="${1:-}"
   local guard_status
   local -a guard_command
+  if hermes_skip_config_integrity; then
+    echo "[config] Skipping Hermes MCP integrity check (NEMOCLAW_SKIP_HERMES_CONFIG_INTEGRITY)" >&2
+    HERMES_MCP_RECONCILE_PENDING=0
+    HERMES_MCP_INTEGRITY_FAILED=0
+    return 0
+  fi
   [ -n "$hash_file" ] || {
     if [ "$(id -u)" -eq 0 ]; then
       hash_file="$HERMES_HASH_FILE"

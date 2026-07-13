@@ -847,6 +847,67 @@ describe("agents/hermes/start.sh port validation", () => {
   });
 });
 
+describe("agents/hermes/start.sh config integrity skip", () => {
+  function runIntegritySkip(env: Record<string, string | undefined>) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-integrity-skip-"));
+    const scriptPath = path.join(tmpDir, "run.sh");
+    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    fs.writeFileSync(
+      scriptPath,
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        extractShellFunctionFromSource(src, "truthy_env"),
+        extractShellFunctionFromSource(src, "hermes_skip_config_integrity"),
+        extractShellFunctionFromSource(src, "verify_hermes_config_integrity"),
+        extractShellFunctionFromSource(src, "inspect_hermes_mcp_integrity"),
+        // Fail closed if skip is ignored — real verifiers must not run.
+        'verify_config_integrity() { echo "unexpected verify_config_integrity" >&2; return 99; }',
+        '_HERMES_PYTHON=python3',
+        '_HERMES_RUNTIME_CONFIG_GUARD=/nonexistent-guard.py',
+        'HERMES_DIR=/tmp/hermes-skip-integrity',
+        'HERMES_HASH_FILE=/tmp/hermes-skip-integrity.hash',
+        "verify_hermes_config_integrity",
+        "inspect_hermes_mcp_integrity",
+        'printf "ok\\n"',
+      ].join("\n"),
+      { mode: 0o700 },
+    );
+
+    try {
+      const childEnv = { ...process.env };
+      for (const [key, value] of Object.entries(env)) {
+        if (value === undefined) {
+          delete childEnv[key];
+        } else {
+          childEnv[key] = value;
+        }
+      }
+      return spawnSync("bash", [scriptPath], {
+        encoding: "utf-8",
+        timeout: 5000,
+        env: childEnv,
+      });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  it("skips Hermes config and MCP integrity when NEMOCLAW_SKIP_HERMES_CONFIG_INTEGRITY is set", () => {
+    const skipped = runIntegritySkip({ NEMOCLAW_SKIP_HERMES_CONFIG_INTEGRITY: "1" });
+    expect(skipped.status).toBe(0);
+    expect(skipped.stderr).toContain("Skipping Hermes config integrity check");
+    expect(skipped.stderr).toContain("Skipping Hermes MCP integrity check");
+    expect(skipped.stdout.trim()).toBe("ok");
+  });
+
+  it("does not skip integrity checks by default", () => {
+    const enforced = runIntegritySkip({ NEMOCLAW_SKIP_HERMES_CONFIG_INTEGRITY: undefined });
+    expect(enforced.status).not.toBe(0);
+    expect(enforced.stderr).toContain("unexpected verify_config_integrity");
+  });
+});
+
 describe("agents/hermes/start.sh validator-path bootstrap", () => {
   function extractValidatorBootstrapBlock(src: string): string {
     const startMarker = "# Resolve the standalone secret-boundary validator";
