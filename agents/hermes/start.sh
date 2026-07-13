@@ -147,8 +147,12 @@ unset -f nemoclaw_normalize_entrypoint_env_wrapper
 # (--mode=network) or this process's parent (--mode=network,process).
 # nemoclaw-start-vm exports NEMOCLAW_VM_SIDECAR=1 before exec'ing this script.
 if [ "${NEMOCLAW_VM_SIDECAR:-}" = "1" ]; then
-  # Supervisor already dropped caps / owns isolation; skip capsh re-exec.
-  export NEMOCLAW_CAPS_DROPPED="${NEMOCLAW_CAPS_DROPPED:-1}"
+  # When OpenShell defers privilege drop, we start as root and take the normal
+  # root seal + setpriv path below. Only skip capsh when already non-root
+  # (legacy sibling / already-dropped topologies).
+  if [ "$(id -u)" -ne 0 ]; then
+    export NEMOCLAW_CAPS_DROPPED="${NEMOCLAW_CAPS_DROPPED:-1}"
+  fi
   # Hermes CLI lives in the image venv (not on the locked-down PATH above).
   export PATH="/opt/hermes/.venv/bin:${PATH}"
 fi
