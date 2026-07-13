@@ -8,11 +8,9 @@
 # (--mode=network) or this process's parent (--mode=network,process).
 # PID 1 is systemd in both cases, not the supervisor.
 #
-# With OPENSHELL_DEFER_PRIVILEGE_DROP=1, openshell-sandbox chowns /sandbox then
-# spawns this entrypoint as root under Landlock/seccomp. start.sh takes the
-# normal root path: seal trust anchors, then setpriv/capsh step-down — matching
-# the container ENTRYPOINT model. If already non-root (legacy sibling layout),
-# start.sh skips the root seal path.
+# Match the OpenShell Pod path: openshell-sandbox chowns /sandbox, drops to
+# sandbox, then Landlock/seccomp + exec. start.sh sees non-root and sets
+# NEMOCLAW_CAPS_DROPPED (skips the root seal + setpriv path).
 
 set -euo pipefail
 
