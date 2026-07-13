@@ -487,6 +487,13 @@ truthy_env() {
   esac
 }
 
+# Opt out of Hermes config/MCP hash enforcement (mutable PVC / in-place disk
+# upgrades where Hermes may rewrite config.yaml without refreshing hashes).
+# Default remains fail-closed. Accepts 1/true/yes/on (case-insensitive).
+hermes_skip_config_integrity() {
+  truthy_env "${NEMOCLAW_SKIP_HERMES_CONFIG_INTEGRITY:-}"
+}
+
 validate_tcp_port() {
   local name="$1"
   local value="$2"
@@ -534,6 +541,10 @@ hermes_dashboard_tui_enabled() {
 # verify_config_integrity is provided by sandbox-init.sh (parameterized).
 
 verify_hermes_config_integrity() {
+  if hermes_skip_config_integrity; then
+    echo "[config] Skipping Hermes config integrity check (NEMOCLAW_SKIP_HERMES_CONFIG_INTEGRITY)" >&2
+    return 0
+  fi
   if [ "$(id -u)" -eq 0 ]; then
     # Docker may start UID 0 without the supplementary groups declared in
     # /etc/group, and hardened runtimes can drop CAP_DAC_OVERRIDE before this
@@ -2790,6 +2801,68 @@ refresh_hermes_runtime_config_hashes() {
   "${cmd[@]}"
 }
 
+inspect_hermes_mcp_integrity() {
+  local hash_file="${1:-}"
+  local guard_status
+  local -a guard_command
+  if hermes_skip_config_integrity; then
+    echo "[config] Skipping Hermes MCP integrity check (NEMOCLAW_SKIP_HERMES_CONFIG_INTEGRITY)" >&2
+    HERMES_MCP_RECONCILE_PENDING=0
+    HERMES_MCP_INTEGRITY_FAILED=0
+    return 0
+  fi
+  [ -n "$hash_file" ] || {
+    if [ "$(id -u)" -eq 0 ]; then
+      hash_file="$HERMES_HASH_FILE"
+    else
+      hash_file="${HERMES_DIR}/.config-hash"
+    fi
+  }
+  # Keep the guard as the startup owner's direct child. A command
+  # substitution here would interpose a shell process and invalidate the
+  # exact-parent proof used by --startup-owner. State is returned only through
+  # the kernel-owned exit status: 0=current, 10=pending, anything else=failure.
+  # This avoids a same-UID writable result file or ambiguous shell byte parsing.
+  guard_command=(
+    "$_HERMES_PYTHON" -I "$_HERMES_RUNTIME_CONFIG_GUARD" inspect-mcp-integrity
+    --hermes-dir "$HERMES_DIR"
+    --hash-file "$hash_file"
+    --startup-owner
+    --mcp-state-exit-code
+  )
+  if [ "$(id -u)" -eq 0 ]; then
+    # Hardened managed runtimes can remove root's DAC override before startup.
+    # Read the sandbox-owned mutable config through its owning identity; the
+    # step-down exec still leaves the guard as the startup owner's direct child.
+    guard_command=("${STEP_DOWN_PREFIX_SANDBOX[@]}" "${guard_command[@]}")
+  fi
+  if "${guard_command[@]}" >/dev/null; then
+    guard_status=0
+  else
+    guard_status=$?
+  fi
+  case "$guard_status" in
+    0) HERMES_MCP_RECONCILE_PENDING=0 ;;
+    10) HERMES_MCP_RECONCILE_PENDING=1 ;;
+    *)
+      echo "[SECURITY] HERMES_MCP_CONFIG_DRIFT: MCP intent cannot be matched to the persisted gateway state; rebuild the sandbox from its NemoClaw registry state" >&2
+      return 1
+      ;;
+  esac
+}
+
+commit_hermes_mcp_applied_if_pending() {
+  local mode=compat
+  [ "$HERMES_MCP_RECONCILE_PENDING" -eq 1 ] || return 0
+  [ "$(id -u)" -eq 0 ] && mode=both
+  "$_HERMES_PYTHON" -I "$_HERMES_RUNTIME_CONFIG_GUARD" commit-mcp-applied \
+    --hermes-dir "$HERMES_DIR" \
+    --hash-file "$HERMES_HASH_FILE" \
+    --mode "$mode" \
+    --startup-owner >/dev/null || return 1
+  HERMES_MCP_RECONCILE_PENDING=0
+}
+ 6be5882b0 (Allow skipping Hermes config integrity via env var.)
 ensure_hermes_runtime_api_server_key() {
   local mode="${1:-strict}"
   local env_file="${HERMES_DIR}/.env"
