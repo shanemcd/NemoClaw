@@ -1265,8 +1265,11 @@ RUN set -eu; \
 # The nested write-denial shell returns success after every prohibited mutation
 # fails. Create the wheel before resetting the target so the sandbox installer
 # is the next Python process to use it.
-# ensurepip reads only Python's bundled wheel payload; it performs no external
-# package lookup and therefore needs no BuildKit network option.
+# bundled ensurepip payload while this layer is still root, then verify the
+# sandbox can read but cannot modify the virtual environment used by the
+# installer. The build-only probe wheel has no upstream payload;
+# Dockerfile.base separately verifies the checksum-pinned official Hindsight
+# artifacts without distributing them.
 RUN /opt/hermes/.venv/bin/python -I -m ensurepip --upgrade --default-pip \
     && /opt/hermes/.venv/bin/python -I -m pip --version \
     && chmod 644 /opt/hermes/.venv/.lock \
@@ -1282,12 +1285,13 @@ RUN /opt/hermes/.venv/bin/python -I -m ensurepip --upgrade --default-pip \
     && venv_links="$(cat "$venv_links_file")" \
     && rm -f "$venv_links_file" \
     && expected_venv_links="$(printf '%s\n' \
-        'bin/python -> /usr/bin/python3' \
+        'bin/python -> /usr/bin/python3.13' \
         'bin/python3 -> python' \
         'bin/python3.13 -> python' \
         "lib/python3.13/site-packages/certifi/cacert.pem -> $SSL_CERT_FILE" \
         'lib64 -> lib')" \
-    && test "$venv_links" = "$expected_venv_links" \
+    && { test "$venv_links" = "$expected_venv_links" \
+        || { echo "ERROR: Hermes virtual environment link inventory mismatch" >&2; exit 1; }; } \
     && test "$(readlink -e /opt/hermes/.venv/bin/python)" = "/usr/bin/python3.13" \
     && test "$(readlink -e /opt/hermes/.venv/bin/python3)" = "/usr/bin/python3.13" \
     && test "$(readlink -e /opt/hermes/.venv/bin/python3.13)" = "/usr/bin/python3.13" \
@@ -1308,53 +1312,51 @@ RUN /opt/hermes/.venv/bin/python -I -m ensurepip --upgrade --default-pip \
             exit 0' \
     && test ! -e /opt/hermes/.venv/lib/.nemoclaw-sandbox-write-probe \
     && install -d -o root -g root -m 0755 /tmp/nemoclaw-hindsight-probe \
+    && cp /opt/nemoclaw-hermes-config/hindsight-probe-aiohttp-retry.whl \
+        /tmp/nemoclaw-hindsight-probe/aiohttp_retry-2.9.1-py3-none-any.whl \
+    && rm /opt/nemoclaw-hermes-config/hindsight-probe-aiohttp-retry.whl \
     && /opt/hermes/.venv/bin/python -I -c \
-        "import zipfile; entries = {'hindsight_client/__init__.py': 'NEMOCLAW_BUILD_PROBE_FIXTURE = True\n', 'hindsight_client-0.6.1.dist-info/METADATA': 'Metadata-Version: 2.4\nName: hindsight-client\nVersion: 0.6.1\nSummary: NemoClaw offline lazy-installer build probe\n\n', 'hindsight_client-0.6.1.dist-info/WHEEL': 'Wheel-Version: 1.0\nGenerator: NemoClaw build probe\nRoot-Is-Purelib: true\nTag: py3-none-any\n', 'hindsight_client-0.6.1.dist-info/RECORD': 'hindsight_client/__init__.py,,\nhindsight_client-0.6.1.dist-info/METADATA,,\nhindsight_client-0.6.1.dist-info/WHEEL,,\nhindsight_client-0.6.1.dist-info/RECORD,,\n'}; wheel = zipfile.ZipFile('/tmp/nemoclaw-hindsight-probe/hindsight_client-0.6.1-py3-none-any.whl', 'w', compression=zipfile.ZIP_DEFLATED); [wheel.writestr(name, data) for name, data in entries.items()]; wheel.close()" \
-    && chown root:root /tmp/nemoclaw-hindsight-probe/hindsight_client-0.6.1-py3-none-any.whl \
-    && chmod 0444 /tmp/nemoclaw-hindsight-probe/hindsight_client-0.6.1-py3-none-any.whl \
+        "import zipfile; entries = {'nemoclaw_lazy_probe/__init__.py': 'NEMOCLAW_BUILD_PROBE_FIXTURE = True\n', 'nemoclaw_lazy_probe-1.0.0.dist-info/METADATA': 'Metadata-Version: 2.4\nName: nemoclaw-lazy-probe\nVersion: 1.0.0\nSummary: NemoClaw offline lazy-installer build probe\n\n', 'nemoclaw_lazy_probe-1.0.0.dist-info/WHEEL': 'Wheel-Version: 1.0\nGenerator: NemoClaw build probe\nRoot-Is-Purelib: true\nTag: py3-none-any\n', 'nemoclaw_lazy_probe-1.0.0.dist-info/RECORD': 'nemoclaw_lazy_probe/__init__.py,,\nnemoclaw_lazy_probe-1.0.0.dist-info/METADATA,,\nnemoclaw_lazy_probe-1.0.0.dist-info/WHEEL,,\nnemoclaw_lazy_probe-1.0.0.dist-info/RECORD,,\n'}; wheel = zipfile.ZipFile('/tmp/nemoclaw-hindsight-probe/nemoclaw_lazy_probe-1.0.0-py3-none-any.whl', 'w', compression=zipfile.ZIP_DEFLATED); [wheel.writestr(name, data) for name, data in entries.items()]; wheel.close()" \
+    && chown root:root /tmp/nemoclaw-hindsight-probe/nemoclaw_lazy_probe-1.0.0-py3-none-any.whl \
+    && chmod 0444 /tmp/nemoclaw-hindsight-probe/nemoclaw_lazy_probe-1.0.0-py3-none-any.whl \
+    && install -d -o root -g root -m 0755 /run/nemoclaw \
+    && printf '1\n' > /run/nemoclaw/hermes-bundled-plugins-only \
+    && chown root:root /run/nemoclaw/hermes-bundled-plugins-only \
+    && chmod 0444 /run/nemoclaw/hermes-bundled-plugins-only \
+    && rm -rf /run/nemoclaw/hermes-gateway-lazy-packages \
+    && install -d -o gateway -g gateway -m 0700 /run/nemoclaw/hermes-gateway-lazy-packages \
+    && test "$(stat -c '%U:%G %a' /run/nemoclaw/hermes-gateway-lazy-packages)" = "gateway:gateway 700" \
     && rm -rf /sandbox/.hermes/lazy-packages \
-    && install -d -o sandbox -g sandbox -m 0750 /sandbox/.hermes/lazy-packages \
-    && chmod u=rwx,g=rx,o=,g-s /sandbox/.hermes/lazy-packages \
-    && test "$(stat -c '%U:%G %a' /sandbox/.hermes/lazy-packages)" = "sandbox:sandbox 750" \
-    && test -z "$(find /sandbox/.hermes/lazy-packages -mindepth 1 -print -quit)" \
+    && install -d -o sandbox -g sandbox -m 0750 /sandbox/.hermes/lazy-packages/nemoclaw_lazy_probe \
+    && printf '%s\n' 'NEMOCLAW_SANDBOX_TAMPER_FIXTURE = True' > /sandbox/.hermes/lazy-packages/nemoclaw_lazy_probe/__init__.py \
+    && printf '%s\n' "import pathlib; pathlib.Path('/tmp/nemoclaw-sandbox-lazy-pth-executed').write_text('unsafe')" > /sandbox/.hermes/lazy-packages/nemoclaw_sandbox_tamper.pth \
+    && chown -R sandbox:sandbox /sandbox/.hermes/lazy-packages \
+    && chmod 0750 /sandbox/.hermes/lazy-packages /sandbox/.hermes/lazy-packages/nemoclaw_lazy_probe \
+    && chmod 0640 /sandbox/.hermes/lazy-packages/nemoclaw_lazy_probe/__init__.py /sandbox/.hermes/lazy-packages/nemoclaw_sandbox_tamper.pth \
     && HOME=/sandbox \
         PIP_FIND_LINKS=/tmp/nemoclaw-hindsight-probe \
         PIP_NO_INDEX=1 \
-        UV_CACHE_DIR=/sandbox/.hermes/cache/uv \
+        UV_CACHE_DIR=/run/nemoclaw/hermes-gateway-lazy-packages/.uv-cache \
         UV_FIND_LINKS=/tmp/nemoclaw-hindsight-probe \
         UV_NO_CACHE=1 \
         UV_OFFLINE=1 \
         HERMES_HOME=/sandbox/.hermes \
-        HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages \
-        /usr/bin/setpriv --reuid=sandbox --regid=sandbox --init-groups -- \
+        HERMES_LAZY_INSTALL_TARGET=/run/nemoclaw/hermes-gateway-lazy-packages \
+        /usr/bin/setpriv --reuid=gateway --regid=gateway --init-groups -- \
         /opt/hermes/.venv/bin/python -I -c \
-        "from tools.lazy_deps import ensure; ensure('memory.hindsight', prompt=False)" \
+        "from tools import lazy_deps; result = lazy_deps._venv_pip_install(('/tmp/nemoclaw-hindsight-probe/nemoclaw_lazy_probe-1.0.0-py3-none-any.whl',)); assert result.success, result.stderr or result.stdout" \
     && rm -rf /tmp/nemoclaw-hindsight-probe \
-    && HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages \
-        /usr/bin/setpriv --reuid=sandbox --regid=sandbox --init-groups -- \
-        /opt/hermes/.venv/bin/python -I -c \
-        "from tools.lazy_deps import activate_durable_lazy_target; activate_durable_lazy_target(); import hindsight_client, importlib.metadata as m; from pathlib import Path; target = Path('/sandbox/.hermes/lazy-packages').resolve(); assert m.version('hindsight-client') == '0.6.1'; assert hindsight_client.NEMOCLAW_BUILD_PROBE_FIXTURE is True; assert Path(hindsight_client.__file__).resolve().is_relative_to(target)" \
-    && lazy_plan='{"version":1,"readOnlyRoots":["lazy-packages"],"confidentialRoots":[],"readOnlyPrefixes":[],"confidentialPrefixes":[],"writableSubpaths":[]}' \
-    && /usr/local/lib/nemoclaw/state-dir-guard.py lock \
-        --config-dir /sandbox/.hermes --plan-json "$lazy_plan" \
     && /usr/bin/setpriv --reuid=gateway --regid=gateway --init-groups -- \
-        env HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages \
+        env HERMES_LAZY_INSTALL_TARGET=/run/nemoclaw/hermes-gateway-lazy-packages \
         /opt/hermes/.venv/bin/python -I -c \
-        "from tools.lazy_deps import activate_durable_lazy_target; activate_durable_lazy_target(); import hindsight_client; from pathlib import Path; assert hindsight_client.NEMOCLAW_BUILD_PROBE_FIXTURE is True; assert Path(hindsight_client.__file__).resolve().is_relative_to(Path('/sandbox/.hermes/lazy-packages').resolve())" \
-    && if /usr/bin/setpriv --reuid=gateway --regid=gateway --init-groups -- \
-        sh -c ': > /sandbox/.hermes/lazy-packages/.nemoclaw-gateway-write-probe' 2>/dev/null; then \
-        echo "ERROR: gateway can modify locked Hermes lazy packages" >&2; exit 1; \
-    fi \
-    && if /usr/bin/setpriv --reuid=sandbox --regid=sandbox --init-groups -- \
-        sh -c ': > /sandbox/.hermes/lazy-packages/.python-abi' 2>/dev/null; then \
-        echo "ERROR: sandbox can modify locked Hermes lazy packages" >&2; exit 1; \
-    fi \
-    && test ! -e /sandbox/.hermes/lazy-packages/.nemoclaw-gateway-write-probe \
-    && /usr/local/lib/nemoclaw/state-dir-guard.py unlock \
-        --config-dir /sandbox/.hermes --plan-json "$lazy_plan" \
+        "import hermes_bootstrap, nemoclaw_lazy_probe, importlib.metadata as m, pathlib, sys; gateway_target = pathlib.Path('/run/nemoclaw/hermes-gateway-lazy-packages').resolve(); sandbox_target = pathlib.Path('/sandbox/.hermes/lazy-packages').resolve(); assert m.version('nemoclaw-lazy-probe') == '1.0.0'; assert nemoclaw_lazy_probe.NEMOCLAW_BUILD_PROBE_FIXTURE is True; assert pathlib.Path(nemoclaw_lazy_probe.__file__).resolve().is_relative_to(gateway_target); assert str(sandbox_target) not in sys.path; assert not pathlib.Path('/tmp/nemoclaw-sandbox-lazy-pth-executed').exists()" \
+    && test ! -e /tmp/nemoclaw-sandbox-lazy-pth-executed \
+    && test "$(stat -c '%U:%G' /run/nemoclaw/hermes-gateway-lazy-packages/nemoclaw_lazy_probe/__init__.py)" = "gateway:gateway" \
     && /usr/bin/setpriv --reuid=sandbox --regid=sandbox --init-groups -- \
-        sh -c ': > /sandbox/.hermes/lazy-packages/.nemoclaw-sandbox-unlock-probe' \
-    && test -f /sandbox/.hermes/lazy-packages/.nemoclaw-sandbox-unlock-probe \
+        sh -eu -c 'test ! -r /run/nemoclaw/hermes-gateway-lazy-packages/nemoclaw_lazy_probe/__init__.py; if printf unsafe > /run/nemoclaw/hermes-gateway-lazy-packages/.nemoclaw-sandbox-write-probe 2>/dev/null; then exit 1; fi' \
+    && test ! -e /run/nemoclaw/hermes-gateway-lazy-packages/.nemoclaw-sandbox-write-probe \
+    && rm -rf /run/nemoclaw/hermes-gateway-lazy-packages \
+    && rm -f /run/nemoclaw/hermes-bundled-plugins-only \
     && rm -rf /sandbox/.hermes/lazy-packages \
     && install -d -o sandbox -g sandbox -m 0750 /sandbox/.hermes/lazy-packages \
     && chmod u=rwx,g=rx,o=,g-s /sandbox/.hermes/lazy-packages \
