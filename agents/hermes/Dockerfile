@@ -613,6 +613,7 @@ RUN test -x /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py \
 ARG NEMOCLAW_HERMES_CRON_RESTORE_DRAIN_PATCHER_SHA256=d28c55ebad5a10c3086d2cf8360f136002f9a9fca1a9ec129f75365b76ef4a74
 ARG NEMOCLAW_HERMES_DRAIN_CONTROL_SOURCE_SHA256=4195245d27b7b067b416b69f4728fcfcdd97c912bdb0954f14402b35601f76cc
 ARG NEMOCLAW_HERMES_GATEWAY_RUN_SOURCE_SHA256=8b8def1d9cb8088d4de7dd3d920d31fb0d959f4d6ffffadf6dd8f8320da5e00b
+ARG NEMOCLAW_HERMES_CRON_JOBS_SOURCE_SHA256=dd5c7c601e23e5058e93d824b17ff426ed2cc5113c20d431ea4937274be59923
 ARG NEMOCLAW_HERMES_DRAIN_CONTROL_PATCHED_SHA256=6d1c20afd6d0030a4d7c0fcc5a82dea1a9d9b912886aff1343597cfe74be1c8a
 ARG NEMOCLAW_HERMES_GATEWAY_RUN_DRAIN_PATCHED_SHA256=30a36097a525449bc9d3b721ba3c3047b1c4f2d8a19da8027bb280867c2d6823
 # hadolint ignore=DL4006
@@ -811,19 +812,6 @@ COPY --from=hermes-wrapper-payload / /
 
 RUN test -x /usr/bin/python3 \
     || { echo "ERROR: /usr/bin/python3 missing or not executable; hermes-wrapper shebang would ENOEXEC" >&2; exit 1; }
-# hadolint ignore=DL4006
-RUN hermes_version_output="$(/usr/local/bin/hermes --version)" \
-    && hermes_semver="$(printf '%s\n' "$hermes_version_output" | sed -n 's/.*v\([0-9][0-9]*[.][0-9][0-9]*[.][0-9][0-9]*\).*/\1/p; s/^\([0-9][0-9]*[.][0-9][0-9]*[.][0-9][0-9]*\)$/\1/p' | head -1)" \
-    && if [ -z "$hermes_semver" ]; then \
-        echo "ERROR: could not parse Hermes semver from: $hermes_version_output" >&2; \
-        exit 1; \
-    fi \
-    && if [ "$hermes_semver" != "0.19.0" ] \
-        && { grep -q '"resumed_oneshot"' /usr/local/share/nemoclaw/hermes-cli-adapter-v1.json \
-          || grep -q 'EXPECTED_OCCURRENCES' /usr/local/lib/nemoclaw/patch-hermes-session-list-preview.py; }; then \
-        echo "ERROR: installed Hermes ${hermes_semver} but Hermes v0.19.0 compatibility workarounds are still installed; re-review #5254 workaround removal before upgrading Hermes" >&2; \
-        exit 1; \
-    fi
 # hadolint ignore=DL4006
 RUN printf '%s  %s\n' \
         "$NEMOCLAW_HERMES_WRAPPER_SHA256" /usr/local/lib/nemoclaw/hermes-wrapper.py \
