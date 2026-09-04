@@ -99,6 +99,7 @@ COPY src/lib/hermes-managed-route.ts /src/lib/hermes-managed-route.ts
 COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
 COPY src/lib/messaging/ /src/lib/messaging/
 COPY scripts/lib/openclaw-npm-remediation.mts /scripts/lib/openclaw-npm-remediation.mts
+ADD --checksum=sha256:66d2759d1921838256a05a3f80ad7e724936f083e35be5abb5e16eed6be6dc54 https://files.pythonhosted.org/packages/1a/99/84ba7273339d0f3dfa57901b846489d2e5c2cd731470167757f1935fffbd/aiohttp_retry-2.9.1-py3-none-any.whl /opt/nemoclaw-hermes-config/hindsight-probe-aiohttp-retry.whl
 
 FROM scratch AS hermes-runtime-payload
 
