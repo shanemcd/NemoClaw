@@ -377,8 +377,14 @@ RUN set -eu; \
 # published base can carry the expected Hermes version while omitting either
 # optional dependency group. This is a build-time package/import guard; live
 # protocol behavior remains a separate E2E concern.
-RUN /opt/hermes/.venv/bin/python -I -c \
-    'import importlib.metadata as metadata; import sys; import acp; import mcp; from acp_adapter.server import HermesACPAgent; from tools import mcp_tool; metadata.version("agent-client-protocol") == "0.9.0" or sys.exit("Hermes ACP SDK version is unavailable"); getattr(mcp_tool, "_MCP_AVAILABLE", False) or sys.exit("Hermes MCP client runtime is unavailable"); getattr(mcp_tool, "_MCP_HTTP_AVAILABLE", False) or sys.exit("Hermes MCP Streamable HTTP runtime is unavailable")'
+ARG NEMOCLAW_HERMES_IMAGE_BUILD_PROBES_SHA256=7c74c3f190845fef222e3aac1bd7074d58968447e78221114344545c149595c2
+# hadolint ignore=DL3059,DL4006
+RUN printf '%s  %s\n' \
+        "$NEMOCLAW_HERMES_IMAGE_BUILD_PROBES_SHA256" /opt/nemoclaw-hermes-config/image-build-probes.py \
+    | sha256sum -c - \
+    || { echo "ERROR: image-build-probes.py hash mismatch (update NEMOCLAW_HERMES_IMAGE_BUILD_PROBES_SHA256)" >&2; exit 1; }; \
+    /opt/hermes/.venv/bin/python -I \
+        /opt/nemoclaw-hermes-config/image-build-probes.py managed-runtime-capability
 
 RUN chmod -R a+rX /opt/hermes/.venv \
     && test -r /opt/hermes/.venv/pyvenv.cfg \
