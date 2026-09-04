@@ -377,15 +377,9 @@ RUN set -eu; \
 # published base can carry the expected Hermes version while omitting either
 # optional dependency group. This is a build-time package/import guard; live
 # protocol behavior remains a separate E2E concern.
-ARG NEMOCLAW_HERMES_IMAGE_BUILD_PROBES_SHA256=7c74c3f190845fef222e3aac1bd7074d58968447e78221114344545c149595c2
-# hadolint ignore=DL3059,DL4006
-RUN printf '%s  %s\n' \
-        "$NEMOCLAW_HERMES_IMAGE_BUILD_PROBES_SHA256" /opt/nemoclaw-hermes-config/image-build-probes.py \
-    | sha256sum -c - \
-    || { echo "ERROR: image-build-probes.py hash mismatch (update NEMOCLAW_HERMES_IMAGE_BUILD_PROBES_SHA256)" >&2; exit 1; }; \
-    /opt/hermes/.venv/bin/python -I \
-        /opt/nemoclaw-hermes-config/image-build-probes.py managed-runtime-capability
-
+# NOTE: requires /opt/nemoclaw-hermes-config/image-build-probes.py, delivered
+# by COPY --from=hermes-agent-payload below; upstream places the probe after
+# that COPY for the same reason.
 RUN chmod -R a+rX /opt/hermes/.venv \
     && test -r /opt/hermes/.venv/pyvenv.cfg \
     && su -s /bin/sh sandbox -c '/opt/hermes/.venv/bin/python3 -c "import urllib.request"'
@@ -463,6 +457,18 @@ ENV HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=1
 ENV HERMES_TUI_DIR="/opt/hermes/ui-tui"
 
 COPY --from=hermes-agent-payload / /
+
+# Managed MCP and ACP require their packaged Hermes client surfaces. A
+# published base can carry the expected Hermes version while omitting either
+# optional dependency group. Build-time package/import guard only; live
+# protocol behavior remains a separate E2E concern.
+# hadolint ignore=DL3059,DL4006
+RUN printf '%s  %s\n' \
+        "$NEMOCLAW_HERMES_IMAGE_BUILD_PROBES_SHA256" /opt/nemoclaw-hermes-config/image-build-probes.py \
+    | sha256sum -c - \
+    || { echo "ERROR: image-build-probes.py hash mismatch (update NEMOCLAW_HERMES_IMAGE_BUILD_PROBES_SHA256)" >&2; exit 1; }; \
+    /opt/hermes/.venv/bin/python -I \
+        /opt/nemoclaw-hermes-config/image-build-probes.py managed-runtime-capability
 
 # Ensure the NemoClaw plugin for Hermes is readable.
 RUN chmod -R a+rX /opt/nemoclaw-hermes-plugin/
