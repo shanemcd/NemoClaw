@@ -604,7 +604,7 @@ RUN /usr/bin/python3 -I \
 # only this audit database to the existing cross-UID runtime boundary, and keep
 # Hermes' quick snapshot inventory aligned. Full source hashes and shape-constrained
 # patching force a fresh review when either pinned upstream module changes.
-ARG NEMOCLAW_HERMES_CRON_RUNTIME_PATCHER_SHA256=2f0d3eacc02ee72608cd96d521a457ef57425bdddc00291ed90ae553f7a36039
+ARG NEMOCLAW_HERMES_CRON_RUNTIME_PATCHER_SHA256=0ae5bad0e00f9a2425f2c05a5067a0b8db9ed13cf5d4e1eefc085cfac7309f0a
 ARG NEMOCLAW_HERMES_CRON_EXECUTIONS_SOURCE_SHA256=b37215a27a453191420622f78dc8962fa44feac2521a6f51d71b18831e7cacb7
 ARG NEMOCLAW_HERMES_BACKUP_SOURCE_SHA256=1bcef6f736f1d52055837789f24becdba4a670f0a1abb5ac9973b1a1a7306f35
 # hadolint ignore=DL4006
