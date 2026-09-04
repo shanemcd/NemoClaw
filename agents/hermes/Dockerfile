@@ -681,7 +681,7 @@ RUN /usr/bin/python3 -I /opt/nemoclaw-hermes-config/image-build-probes.py \
 # the OpenShell public and secret placeholders when each placeholder is bound
 # to its matching standard Langfuse key. raw keys keep Hermes' upstream pk-lf-/sk-lf- validation. The patcher
 # fails closed when the pinned upstream source shape changes.
-ARG NEMOCLAW_HERMES_LANGFUSE_PATCHER_SHA256=c6aad6a7cb56083a3fbb54617ada3edae4bbae1348ba45565944144b07fc283b
+ARG NEMOCLAW_HERMES_LANGFUSE_PATCHER_SHA256=a505357f9991d85e42d6cb2fcd320fb6f3a989f090a7969c0460265254e7d9c6
 # hadolint ignore=DL4006
 RUN printf '%s  %s\n' \
         "$NEMOCLAW_HERMES_LANGFUSE_PATCHER_SHA256" /usr/local/lib/nemoclaw/patch-hermes-langfuse-credentials.mts \
