@@ -644,7 +644,7 @@ RUN /usr/bin/python3 -I /usr/local/lib/nemoclaw/patch-hermes-session-list-previe
 # `sqlite3.OperationalError: unable to open database file` (#8301). Inserting
 # PRAGMA temp_store=MEMORY before PRAGMA foreign_keys=ON ensures FK processing
 # uses in-memory storage. Docker execution permits the file-based storage path.
-ARG NEMOCLAW_HERMES_SQLITE_TEMP_STORE_PATCHER_SHA256=2db46b6cd358f4d181999bbddbc0d35d035a67ee1092adb2e2c16a894c695e13
+ARG NEMOCLAW_HERMES_SQLITE_TEMP_STORE_PATCHER_SHA256=1eff38472fa25f915bfc1d8d5168cbb3f1600a0e322f88b18974d01a8a4f713f
 # hadolint ignore=DL4006
 RUN printf '%s  %s\n' \
         "$NEMOCLAW_HERMES_SQLITE_TEMP_STORE_PATCHER_SHA256" /usr/local/lib/nemoclaw/patch-hermes-sqlite-temp-store.py \
