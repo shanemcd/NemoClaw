@@ -628,8 +628,8 @@ RUN test -x /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py \
 # predicate during GatewayRunner construction so startup cannot dispatch before
 # the asynchronous watcher gets its first tick.
 ARG NEMOCLAW_HERMES_CRON_RESTORE_DRAIN_PATCHER_SHA256=d28c55ebad5a10c3086d2cf8360f136002f9a9fca1a9ec129f75365b76ef4a74
-ARG NEMOCLAW_HERMES_DRAIN_CONTROL_SOURCE_SHA256=5436daa7807ce3e765dac084974af025c8ffd0515faca15ac455ade2595e4af7
- b55fff200 (fix(hermes): refresh all stale SHA pins after upstream rebase)
+ARG NEMOCLAW_HERMES_DRAIN_CONTROL_SOURCE_SHA256=4195245d27b7b067b416b69f4728fcfcdd97c912bdb0954f14402b35601f76cc
+ 2972e47ec (fix(hermes): adopt upstream base image digest and sync base-image pins)
 # hadolint ignore=DL4006
 RUN printf '%s  %s\n' \
         "$NEMOCLAW_HERMES_CRON_RESTORE_DRAIN_PATCHER_SHA256" /opt/nemoclaw-hermes-config/patch-cron-restore-drain.py \
@@ -1021,8 +1021,8 @@ RUN /usr/bin/python3 -I /usr/local/lib/nemoclaw/patch-hermes-profile-policy-defa
 # output module and this narrow patcher before preserving explicit disables
 # across environment processing.
 ARG NEMOCLAW_HERMES_NEUTRAL_PLATFORM_PATCHER_SHA256=43b90f768d5a627417d1eef72427abb1cf256e348cd7d1a91bf2afd32fe9894b
-ARG NEMOCLAW_HERMES_POST_PROFILE_GATEWAY_CONFIG_SHA256=b50a8390311c828fa9e13084e9af0caadafe2380ae161ef36dd4bdf792b22ee6
- b55fff200 (fix(hermes): refresh all stale SHA pins after upstream rebase)
+ARG NEMOCLAW_HERMES_POST_PROFILE_GATEWAY_CONFIG_SHA256=c0080c4da9b04c4749e92561c1c68a3f4debbc62a502cd47b139180442219621
+ 2972e47ec (fix(hermes): adopt upstream base image digest and sync base-image pins)
 # hadolint ignore=DL4006
 RUN printf '%s  %s\n' \
         "$NEMOCLAW_HERMES_NEUTRAL_PLATFORM_PATCHER_SHA256" /opt/nemoclaw-hermes-config/patch-neutral-platform-env-activation.py \
