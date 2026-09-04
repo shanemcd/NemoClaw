@@ -629,7 +629,8 @@ RUN test -x /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py \
 # the asynchronous watcher gets its first tick.
 ARG NEMOCLAW_HERMES_CRON_RESTORE_DRAIN_PATCHER_SHA256=d28c55ebad5a10c3086d2cf8360f136002f9a9fca1a9ec129f75365b76ef4a74
 ARG NEMOCLAW_HERMES_DRAIN_CONTROL_SOURCE_SHA256=4195245d27b7b067b416b69f4728fcfcdd97c912bdb0954f14402b35601f76cc
- 2972e47ec (fix(hermes): adopt upstream base image digest and sync base-image pins)
+ARG NEMOCLAW_HERMES_GATEWAY_RUN_SOURCE_SHA256=8b8def1d9cb8088d4de7dd3d920d31fb0d959f4d6ffffadf6dd8f8320da5e00b
+ d1a9f6687 (fix(hermes): reconcile Hindsight/base-contract block with upstream main)
 # hadolint ignore=DL4006
 RUN printf '%s  %s\n' \
         "$NEMOCLAW_HERMES_CRON_RESTORE_DRAIN_PATCHER_SHA256" /opt/nemoclaw-hermes-config/patch-cron-restore-drain.py \
