@@ -76,7 +76,9 @@ COPY scripts/lib/bundled-npm-package.mts /scripts/lib/bundled-npm-package.mts
 COPY scripts/patch-bundled-npm-brace-expansion.mts /scripts/patch-bundled-npm-brace-expansion.mts
 COPY scripts/lib/patch-bundled-npm-ip-address.mts /scripts/lib/patch-bundled-npm-ip-address.mts
 COPY scripts/patch-bundled-npm-tar.mts /scripts/patch-bundled-npm-tar.mts
-COPY agents/hermes/security-dependencies.patch /scripts/hermes-security-dependencies.patch
+COPY agents/hermes/runtime-boundaries.patch /scripts/hermes-runtime-boundaries.patch
+COPY agents/hermes/dashboard-external-host.patch /scripts/hermes-dashboard-external-host.patch
+COPY agents/hermes/secure-dir-skip-chmod.patch /scripts/hermes-secure-dir-skip-chmod.patch
 
 FROM scratch AS hermes-agent-payload
 
@@ -251,28 +253,80 @@ RUN if [ -n "${NEMOCLAW_CORPORATE_CA_B64}" ]; then \
 # one final-image layer while preserving metadata on existing parent paths.
 COPY --from=hermes-npm-patch-payload / /
 
-# A published base can lag the source patch in Dockerfile.base. Apply only the
-# two Hindsight compatibility hunks when needed, then verify the final source
-# contract. This remains idempotent once the published base contains them.
-RUN if ! grep -Fq 'ensure("memory.hindsight", prompt=False)' /opt/hermes/hermes_cli/memory_setup.py; then \
-        git -C /opt/hermes apply --check \
-            --include=hermes_cli/memory_setup.py \
-            /scripts/hermes-security-dependencies.patch; \
-        git -C /opt/hermes apply \
-            --include=hermes_cli/memory_setup.py \
-            /scripts/hermes-security-dependencies.patch; \
-    fi \
-    && if ! grep -Fqx '  - "hindsight-client==0.6.1"' /opt/hermes/plugins/memory/hindsight/plugin.yaml; then \
-        git -C /opt/hermes apply --check \
-            --include=plugins/memory/hindsight/plugin.yaml \
-            /scripts/hermes-security-dependencies.patch; \
-        git -C /opt/hermes apply \
-            --include=plugins/memory/hindsight/plugin.yaml \
-            /scripts/hermes-security-dependencies.patch; \
-    fi \
-    && grep -Fq 'ensure("memory.hindsight", prompt=False)' /opt/hermes/hermes_cli/memory_setup.py \
+# The immutable selected base owns the reviewed Hindsight and agent-browser
+# patches and the root-owned agent-browser runtime. Verify that inherited boundary
+# without adding a second network-capable install owner in the final image.
+# Apply the dashboard Host guard when the published 0.20.6 base predates that
+# source fix, then verify the exact accepted-host contract.
+# hadolint ignore=DL4006
+RUN grep -Fq 'from tools.lazy_deps import install_specs' /opt/hermes/hermes_cli/memory_setup.py \
+    && grep -Fq 'outcome = install_specs(missing, timeout=120)' /opt/hermes/hermes_cli/memory_setup.py \
     && grep -Fqx '  - "hindsight-client==0.6.1"' /opt/hermes/plugins/memory/hindsight/plugin.yaml \
-    && rm /scripts/hermes-security-dependencies.patch
+    && grep -Fqx 'AGENT_BROWSER_NPX_SPEC = "agent-browser@0.26.0"' /opt/hermes/tools/browser_tool.py \
+    && test "$(readlink /usr/local/bin/agent-browser)" = \
+        '/opt/nemoclaw-agent-browser-runtime/node_modules/.bin/agent-browser' \
+    && agent_browser_version="$( \
+        /usr/bin/setpriv --reuid=sandbox --regid=sandbox --init-groups -- \
+            /usr/local/bin/agent-browser --version \
+    )" \
+    && test "$agent_browser_version" = 'agent-browser 0.26.0' \
+    && if ! grep -Fq 'if external_host and host_only == external_host:' /opt/hermes/hermes_cli/web_server.py; then \
+        git -C /opt/hermes apply --check \
+            --include=hermes_cli/web_server.py \
+            /scripts/hermes-dashboard-external-host.patch; \
+        git -C /opt/hermes apply \
+            --include=hermes_cli/web_server.py \
+            /scripts/hermes-dashboard-external-host.patch; \
+    fi \
+    && grep -Fqx '_NEMOCLAW_DASHBOARD_EXTERNAL_HOST_ENV = "_NEMOCLAW_HERMES_DASHBOARD_EXTERNAL_HOST"' /opt/hermes/hermes_cli/web_server.py \
+    && grep -Fq 'if external_host and host_only == external_host:' /opt/hermes/hermes_cli/web_server.py \
+    && rm /scripts/hermes-dashboard-external-host.patch \
+    && printf '%s  %s\n' \
+        "$NEMOCLAW_HERMES_SECURE_DIR_PATCH_SHA256" /scripts/hermes-secure-dir-skip-chmod.patch \
+    | sha256sum -c - \
+    || { echo "ERROR: Hermes secure-directory patch identity mismatch" >&2; exit 1; } \
+    && secure_dir_source_sha="$(sha256sum /opt/hermes/hermes_cli/config.py | awk '{print $1}')" \
+    && if [ "$secure_dir_source_sha" = "$NEMOCLAW_HERMES_SECURE_DIR_SOURCE_SHA256" ]; then \
+        git -C /opt/hermes apply --check /scripts/hermes-secure-dir-skip-chmod.patch; \
+        git -C /opt/hermes apply /scripts/hermes-secure-dir-skip-chmod.patch; \
+    elif [ "$secure_dir_source_sha" != "$NEMOCLAW_HERMES_SECURE_DIR_OUTPUT_SHA256" ]; then \
+        echo "ERROR: Hermes secure-directory source identity mismatch" >&2; \
+        exit 1; \
+    fi \
+    && printf '%s  %s\n' \
+        "$NEMOCLAW_HERMES_SECURE_DIR_OUTPUT_SHA256" /opt/hermes/hermes_cli/config.py \
+    | sha256sum -c - \
+    || { echo "ERROR: Hermes secure-directory patched output identity mismatch" >&2; exit 1; } \
+    && rm /scripts/hermes-secure-dir-skip-chmod.patch \
+    && printf '%s  %s\n' "$NEMOCLAW_HERMES_RUNTIME_BOUNDARIES_PATCH_SHA256" /scripts/hermes-runtime-boundaries.patch | sha256sum -c - \
+    && if ! grep -Fq 'def nemoclaw_managed_gateway_plugins_only()' /opt/hermes/hermes_constants.py; then \
+        git -C /opt/hermes apply --check \
+            --include=hermes_constants.py \
+            --include=hermes_cli/env_loader.py \
+            --include=hermes_cli/plugins.py \
+            --include=plugins/memory/__init__.py \
+            --include=plugins/cron_providers/__init__.py \
+            --include=providers/__init__.py \
+            --include=tools/lazy_deps.py \
+            /scripts/hermes-runtime-boundaries.patch; \
+        git -C /opt/hermes apply \
+            --include=hermes_constants.py \
+            --include=hermes_cli/env_loader.py \
+            --include=hermes_cli/plugins.py \
+            --include=plugins/memory/__init__.py \
+            --include=plugins/cron_providers/__init__.py \
+            --include=providers/__init__.py \
+            --include=tools/lazy_deps.py \
+            /scripts/hermes-runtime-boundaries.patch; \
+    fi \
+    && grep -Fq 'def nemoclaw_managed_gateway_plugins_only()' /opt/hermes/hermes_constants.py \
+    && grep -Fq 'nemoclaw_protected_process_control' /opt/hermes/hermes_cli/env_loader.py \
+    && grep -Fq 'nemoclaw_sanitized_installer_env' /opt/hermes/tools/lazy_deps.py \
+    && grep -Fq 'Managed gateway: user and project plugins disabled' /opt/hermes/hermes_cli/plugins.py \
+    && grep -Fq 'nemoclaw_managed_gateway_plugins_only' /opt/hermes/plugins/memory/__init__.py \
+    && grep -Fq 'nemoclaw_managed_gateway_plugins_only' /opt/hermes/plugins/cron_providers/__init__.py \
+    && grep -Fq 'nemoclaw_managed_gateway_plugins_only' /opt/hermes/providers/__init__.py \
+    && rm /scripts/hermes-runtime-boundaries.patch
 
 # The final Hermes image owns the shipped dependency boundary independently of
 # base freshness. Reassert the idempotent npm-private node-tar fix from the
@@ -543,6 +597,10 @@ ARG NEMOCLAW_HERMES_DRAIN_CONTROL_SOURCE_SHA256=4195245d27b7b067b416b69f4728fcfc
 ARG NEMOCLAW_HERMES_GATEWAY_RUN_SOURCE_SHA256=8b8def1d9cb8088d4de7dd3d920d31fb0d959f4d6ffffadf6dd8f8320da5e00b
 ARG NEMOCLAW_HERMES_DRAIN_CONTROL_PATCHED_SHA256=6d1c20afd6d0030a4d7c0fcc5a82dea1a9d9b912886aff1343597cfe74be1c8a
 ARG NEMOCLAW_HERMES_GATEWAY_RUN_DRAIN_PATCHED_SHA256=30a36097a525449bc9d3b721ba3c3047b1c4f2d8a19da8027bb280867c2d6823
+ARG NEMOCLAW_HERMES_RUNTIME_BOUNDARIES_PATCH_SHA256=820563cc3450de582663c8137670001bb9974ac8a5584901880982f6509747b8
+ARG NEMOCLAW_HERMES_SECURE_DIR_SOURCE_SHA256=ffae3271120cf53eb8a7f574f76758eac3ea172f9ddc22c1056277e37d8d392c
+ARG NEMOCLAW_HERMES_SECURE_DIR_PATCH_SHA256=1c1a898226bc67b123ec72847d4dcda7abbab1e95958c9e019790d9425e15d69
+ARG NEMOCLAW_HERMES_SECURE_DIR_OUTPUT_SHA256=130cf4e76d6f4f16b85517cf8d3d81dfe294aff63d6c561b979971c401f78761
 # hadolint ignore=DL4006
 RUN printf '%s  %s\n' \
         "$NEMOCLAW_HERMES_CRON_RESTORE_DRAIN_PATCHER_SHA256" /opt/nemoclaw-hermes-config/patch-cron-restore-drain.py \
