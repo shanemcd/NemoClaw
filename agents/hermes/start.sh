@@ -2710,7 +2710,6 @@ commit_hermes_mcp_applied_if_pending() {
     --startup-owner >/dev/null || return 1
   HERMES_MCP_RECONCILE_PENDING=0
 }
- 6be5882b0 (Allow skipping Hermes config integrity via env var.)
 ensure_hermes_runtime_api_server_key() {
   local mode="${1:-strict}"
   local env_file="${HERMES_DIR}/.env"
